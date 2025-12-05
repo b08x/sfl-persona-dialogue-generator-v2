@@ -1,8 +1,6 @@
-
-
 import { GoogleGenAI, GenerateContentResponse, HarmCategory, HarmBlockThreshold } from "@google/genai";
-import { SFL_ANALYSIS_SYSTEM_INSTRUCTION, SFL_ANALYSIS_USER_PROMPT, DIALOGUE_GENERATION_PROMPT, REFINE_LINE_PROMPT, GENERATE_NEXT_LINE_PROMPT } from '../constants';
-import { Persona, SFLAnalysisResult, ShowStructure } from '../types';
+import { SFL_ANALYSIS_SYSTEM_INSTRUCTION, SFL_ANALYSIS_USER_PROMPT_TEXT_PART, DIALOGUE_GENERATION_PROMPT, REFINE_LINE_PROMPT, GENERATE_NEXT_LINE_PROMPT, SHOW_CONTEXT_ANALYSIS_SYSTEM_INSTRUCTION, SHOW_CONTEXT_ANALYSIS_PROMPT } from '../constants';
+import { Persona, SFLAnalysisResult, ShowStructure, SourceContent, ShowContextAnalysisResult } from '../types';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -46,7 +44,7 @@ const getApiResponseText = (response: GenerateContentResponse, errorContext: str
 };
 
 export const analyzeDocument = async (
-  documentText: string,
+  sources: SourceContent[],
   model: string,
   thinkingBudget?: number
 ): Promise<SFLAnalysisResult> => {
@@ -54,11 +52,24 @@ export const analyzeDocument = async (
     throw new Error("API_KEY environment variable not set");
   }
 
-  const MAX_INPUT_CHARS = 850000;
-  let textToAnalyze = documentText;
-  if (documentText.length > MAX_INPUT_CHARS) {
-    console.warn(`Input text for analysis is too long (${documentText.length} chars). Truncating to ${MAX_INPUT_CHARS} characters to prevent token limit errors.`);
-    textToAnalyze = documentText.substring(0, MAX_INPUT_CHARS);
+  // Determine the best model for analysis based on source types, if strict adherence is required
+  let analysisModel = model;
+  const hasVideo = sources.some(s => s.type === 'video');
+  const hasImage = sources.some(s => s.type === 'image');
+  const hasAudio = sources.some(s => s.type === 'audio');
+  const hasOnlyAudio = hasAudio && !hasVideo && !hasImage;
+
+  if (hasVideo || hasImage) {
+    analysisModel = 'gemini-3-pro-preview';
+  } else if (hasOnlyAudio && model === 'gemini-2.5-flash') {
+      // Keep user choice if 2.5 flash is selected for audio, as it's optimized for it
+      analysisModel = 'gemini-2.5-flash';
+  }
+  
+  // If user selected 2.5 flash but uploaded video/images, we override because 3-pro is requested for those
+  if ((hasVideo || hasImage) && model !== 'gemini-3-pro-preview') {
+      console.log('Switching to gemini-3-pro-preview for advanced multimodal analysis');
+      analysisModel = 'gemini-3-pro-preview';
   }
 
   try {
@@ -69,13 +80,37 @@ export const analyzeDocument = async (
         safetySettings,
     };
 
-    if (thinkingBudget !== undefined) {
+    if (thinkingBudget !== undefined && analysisModel !== 'gemini-2.5-flash') {
+        // Thinking budget is generally safer on Pro models or when explicitly supported. 
+        // 2.5 Flash supports it, but let's be careful with overrides.
         config.thinkingConfig = { thinkingBudget };
     }
 
+    const parts: any[] = [];
+    
+    // Add instruction part
+    parts.push({ text: SFL_ANALYSIS_USER_PROMPT_TEXT_PART });
+
+    // Add content parts
+    for (const source of sources) {
+        if (source.type === 'text' || source.type === 'youtube') {
+             // For YouTube, we just pass the link as text for now, assuming the model might have internal knowledge or treat it as metadata
+             // If we had a transcript, we would pass that.
+             parts.push({ text: `\nSource (${source.name}):\n${source.data}\n` });
+        } else {
+            // Audio, Video, Image
+            parts.push({
+                inlineData: {
+                    mimeType: source.mimeType,
+                    data: source.data
+                }
+            });
+        }
+    }
+
     const response: GenerateContentResponse = await ai.models.generateContent({
-      model: model,
-      contents: SFL_ANALYSIS_USER_PROMPT(textToAnalyze),
+      model: analysisModel,
+      contents: { parts },
       config: config,
     });
     
@@ -85,14 +120,71 @@ export const analyzeDocument = async (
     return parsedData;
 
   } catch (error) {
-    console.error("Error analyzing document with Gemini:", error);
+    console.error("Error analyzing sources with Gemini:", error);
     if (error instanceof SyntaxError) {
       throw new Error("Failed to parse the analysis from the AI. The model returned malformed JSON.");
     }
-    throw new Error("Failed to analyze document. The model may have returned an invalid format or an error occurred.");
+    throw new Error("Failed to analyze sources. Ensure your API key is valid and the file sizes are within limits.");
   }
 };
 
+export const analyzeShowContext = async (
+    sources: SourceContent[],
+    model: string,
+    thinkingBudget?: number
+): Promise<ShowContextAnalysisResult> => {
+    if (!process.env.API_KEY) {
+        throw new Error("API_KEY environment variable not set");
+    }
+
+    let analysisModel = model;
+    const hasMultimedia = sources.some(s => ['video', 'image'].includes(s.type));
+    if (hasMultimedia) {
+        analysisModel = 'gemini-3-pro-preview';
+    }
+
+    try {
+        const config: any = {
+            systemInstruction: SHOW_CONTEXT_ANALYSIS_SYSTEM_INSTRUCTION,
+            responseMimeType: "application/json",
+            temperature: 0.7,
+            safetySettings,
+        };
+
+        if (thinkingBudget !== undefined && analysisModel !== 'gemini-2.5-flash') {
+            config.thinkingConfig = { thinkingBudget };
+        }
+
+        const parts: any[] = [];
+        parts.push({ text: SHOW_CONTEXT_ANALYSIS_PROMPT });
+
+        for (const source of sources) {
+            if (source.type === 'text' || source.type === 'youtube') {
+                parts.push({ text: `\nShow Context Source (${source.name}):\n${source.data}\n` });
+            } else {
+                parts.push({
+                    inlineData: {
+                        mimeType: source.mimeType,
+                        data: source.data
+                    }
+                });
+            }
+        }
+
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: analysisModel,
+            contents: { parts },
+            config: config,
+        });
+
+        const text = getApiResponseText(response, 'show context analysis');
+        const jsonStr = cleanJsonString(text);
+        return JSON.parse(jsonStr);
+    } catch (error) {
+        console.error("Error analyzing show context:", error);
+        throw new Error("Failed to analyze show context materials.");
+    }
+}
 
 export const generateDialogue = async (
     personas: Persona[], 
@@ -105,21 +197,48 @@ export const generateDialogue = async (
         throw new Error("API_KEY environment variable not set");
     }
 
-    const prompt = DIALOGUE_GENERATION_PROMPT(personas, structure);
+    const promptText = DIALOGUE_GENERATION_PROMPT(personas, structure);
     
+    // Check if we need to upgrade model due to context sources
+    let generationModel = model;
+    const hasMultimediaContext = structure.contextSources.some(s => ['video', 'image'].includes(s.type));
+    if (hasMultimediaContext && generationModel !== 'gemini-3-pro-preview') {
+        console.log('Switching to gemini-3-pro-preview for multimodal dialogue generation context');
+        generationModel = 'gemini-3-pro-preview';
+    }
+
     try {
         const config: any = {
             temperature: temperature,
             safetySettings,
         };
 
-        if (thinkingBudget !== undefined) {
+        if (thinkingBudget !== undefined && generationModel !== 'gemini-2.5-flash') {
             config.thinkingConfig = { thinkingBudget };
         }
 
+        const parts: any[] = [];
+        parts.push({ text: promptText });
+
+        // Add show context sources as parts to the dialogue generation request
+        if (structure.contextSources.length > 0) {
+            for (const source of structure.contextSources) {
+                if (source.type === 'text' || source.type === 'youtube') {
+                    parts.push({ text: `\nContext Material (${source.name}):\n${source.data}\n` });
+                } else {
+                    parts.push({
+                        inlineData: {
+                            mimeType: source.mimeType,
+                            data: source.data
+                        }
+                    });
+                }
+            }
+        }
+
         const response: GenerateContentResponse = await ai.models.generateContent({
-            model: model,
-            contents: prompt,
+            model: generationModel,
+            contents: { parts },
             config: config
         });
         return getApiResponseText(response, 'dialogue generation');

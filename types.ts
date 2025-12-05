@@ -7,6 +7,7 @@ export interface ProcessDistribution {
 
 export interface SFLAnalysisResult {
   personaStyle: string;
+  tone: string;
   explanationTendency: string;
   dialoguePattern: string;
   confidenceLevel: string;
@@ -20,12 +21,22 @@ export interface SFLAnalysisResult {
   topics: string[];
 }
 
+export type SourceType = 'text' | 'audio' | 'video' | 'image' | 'youtube';
+
+export interface SourceContent {
+  id: string;
+  name: string;
+  type: SourceType;
+  mimeType: string;
+  data: string; // Text content or Base64 string
+}
+
 export interface Persona {
   id: string;
   name: string;
   role: string;
   speakingStyle: string;
-  sourceDocuments: { name: string; content: string }[];
+  sources: SourceContent[];
   sflProfile: SFLAnalysisResult | null;
   isAnalyzing: boolean;
 }
@@ -33,6 +44,13 @@ export interface Persona {
 export interface ShowStructure {
   title: string;
   primaryHostId: string | null;
+  intro: string;
+  topics: string[];
+  contextSources: SourceContent[];
+}
+
+export interface ShowContextAnalysisResult {
+  title: string;
   intro: string;
   topics: string[];
 }

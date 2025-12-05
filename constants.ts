@@ -1,20 +1,14 @@
-
-
 import { Persona, ShowStructure, ModelConfig } from './types';
 
-export const SFL_ANALYSIS_SYSTEM_INSTRUCTION = `You are an expert linguistics analyst specializing in Systemic Functional Linguistics (SFL). Your task is to analyze a given text and provide a detailed linguistic profile in a specific JSON format.`;
+export const SFL_ANALYSIS_SYSTEM_INSTRUCTION = `You are an expert linguistics analyst specializing in Systemic Functional Linguistics (SFL). Your task is to analyze the provided sources (which may include text, audio, video, or images) and provide a detailed linguistic profile in a specific JSON format. When analyzing audio or video, pay close attention to the speaker's tone, pacing, hesitation, and emotional delivery to inform the 'Interpersonal Mapping'.`;
 
-export const SFL_ANALYSIS_USER_PROMPT = (documentText: string) => `
-Please analyze the following document based on SFL principles and provide the output as a single, valid JSON object. Do not include any text or markdown formatting before or after the JSON object.
-
-**DOCUMENT FOR ANALYSIS:**
----
-${documentText}
----
+export const SFL_ANALYSIS_USER_PROMPT_TEXT_PART = `
+Please analyze the provided content based on SFL principles and provide the output as a single, valid JSON object. Do not include any text or markdown formatting before or after the JSON object.
 
 **REQUIRED JSON OUTPUT STRUCTURE:**
 {
   "personaStyle": "string",
+  "tone": "string",
   "explanationTendency": "string",
   "dialoguePattern": "string",
   "confidenceLevel": "string",
@@ -34,27 +28,39 @@ ${documentText}
 }
 
 **ANALYSIS GUIDELINES:**
-1.  **Process Distribution**: Calculate the percentage (%) of Material, Mental, Relational, and Verbal processes in the text. The sum should be 100.
+1.  **Process Distribution**: Calculate the percentage (%) of Material, Mental, Relational, and Verbal processes. The sum should be 100.
 2.  **Ideational Mapping**:
     - IF Relational Processes > 50%: SET personaStyle = "Definitional Expert", explanationTendency = "Classification-focused", dialoguePattern = "What X is/means/represents"
     - ELIF Material Processes > 40%: SET personaStyle = "Action-Oriented Practitioner", explanationTendency = "Process-focused", dialoguePattern = "How X works/happens/is done"
     - ELIF Mental Processes > 35%: SET personaStyle = "Reflective Analyst", explanationTendency = "Interpretation-focused", dialoguePattern = "What X means/implies/suggests"
     - ELIF Verbal Processes > 20%: SET personaStyle = "Research Communicator", explanationTendency = "Evidence-focused", dialoguePattern = "Studies show/experts say/research indicates"
     - ELSE: Use a best-fit description.
-3.  **Interpersonal Mapping**: Analyze modality (e.g., certainty, obligation).
-    - If modality is strong and frequent: SET confidenceLevel = "Highly Certain", hedgingFrequency = "Low", statementStrength = "Definitive".
+3.  **Tone**: Analyze the speaker's emotional and professional demeanor (e.g., "Authoritative", "Conversational", "Energetic", "Empathetic", "Formal", "Witty").
+4.  **Interpersonal Mapping**: Analyze modality (e.g., certainty, obligation) and audio/visual cues if available.
+    - If modality is strong/frequent or voice is firm: SET confidenceLevel = "Highly Certain", hedgingFrequency = "Low", statementStrength = "Definitive".
     - If modality is mixed: SET confidenceLevel = "Moderately Certain", hedgingFrequency = "Medium", statementStrength = "Qualified".
-    - If modality is weak or questioning: SET confidenceLevel = "Cautious", hedgingFrequency = "High", statementStrength = "Tentative".
-4.  **Textual Mapping**: Analyze cohesion.
+    - If modality is weak/questioning or voice is hesitant: SET confidenceLevel = "Cautious", hedgingFrequency = "High", statementStrength = "Tentative".
+5.  **Textual Mapping**: Analyze cohesion.
     - If cohesion is high (many connectors, reference chains): SET informationPackaging = "Highly Integrated", topicDevelopment = "Cumulative Building", referenceStyle = "Complex Chains".
     - If cohesion is moderate: SET informationPackaging = "Moderately Connected", topicDevelopment = "Stepped Progression", referenceStyle = "Clear Links".
     - If cohesion is low: SET informationPackaging = "Discrete Segments", topicDevelopment = "Independent Points", referenceStyle = "Explicit Reference".
-5.  **Technicality Level**: Score from 1 (conversational) to 10 (highly technical) based on lexical density and use of specialized terms.
-6.  **Topic Extraction**: Identify and list up to 5 main topics, keywords, or key phrases from the document.
+6.  **Technicality Level**: Score from 1 (conversational) to 10 (highly technical) based on lexical density and specialized terms.
+7.  **Domain Knowledge & Topics**: Identify 5 key areas of domain expertise, specialized subjects, or core topics this speaker is knowledgeable about. These will be used as their primary knowledge base for dialogue generation.
 
-Now, provide the JSON object for the document provided above.
+Now, provide the JSON object for the content provided.
 `;
 
+export const SHOW_CONTEXT_ANALYSIS_SYSTEM_INSTRUCTION = `You are a creative show producer. Your task is to analyze the provided context materials (documents, audio, video) and outline the structure for a podcast episode.`;
+
+export const SHOW_CONTEXT_ANALYSIS_PROMPT = `
+Analyze the attached materials to determine the best structure for a podcast episode covering this content.
+Output a single valid JSON object with the following structure:
+{
+  "title": "A catchy, relevant title for the episode",
+  "intro": "A brief outline or script for the host's introduction (2-3 sentences)",
+  "topics": ["Topic 1", "Topic 2", "Topic 3", "Topic 4", "Topic 5"]
+}
+`;
 
 export const DIALOGUE_GENERATION_PROMPT = (personas: Persona[], structure: ShowStructure) => `
 You are a master podcast scriptwriter, an expert in generating natural, multi-speaker dialogue based on detailed Systemic Functional Linguistics (SFL) profiles.
@@ -65,34 +71,31 @@ You are a master podcast scriptwriter, an expert in generating natural, multi-sp
 - Generated Intro: "${structure.intro}"
 - Key Topics: ${structure.topics.join(', ')}
 
+**SHOW CONTEXT MATERIAL:**
+Contextual materials (text, audio, video) have been provided for this episode. Use the information, themes, and facts from these materials as the PRIMARY grounding for the conversation content. The speakers should discuss these specific materials.
+
 **SPEAKER PERSONAS & SFL PROFILES:**
 ${JSON.stringify(personas.map(p => ({
     name: p.name, 
     role: p.role, 
     speakingStyle: p.speakingStyle, 
+    domainKnowledge: p.sflProfile?.topics,
     sflProfile: p.sflProfile
 })), null, 2)}
 
 **YOUR TASK:**
 1.  Generate a complete, flowing dialogue script for a podcast episode.
 2.  Each line MUST be prefixed with the speaker's name and a colon (e.g., "Jane Doe: ...").
-3.  Each speaker's dialogue MUST strictly adhere to their SFL profile, role, and speaking style. The speaking style (e.g., "Energetic") is a direct instruction that should strongly influence the tone, word choice, and pacing of their lines.
+3.  Each speaker's dialogue MUST strictly adhere to their SFL profile, role, and speaking style.
     -   A "Definitional Expert" (high relational) should define and classify concepts.
     -   An "Action-Oriented Practitioner" (high material) should talk about processes and implementation.
-    -   A speaker with a "Highly Certain" confidence level should use definitive language. A "Cautious" one should use hedging.
+    -   A speaker with a "Highly Certain" confidence level should use definitive language.
 4.  The Primary Host must guide the conversation, introduce topics, and create smooth transitions.
-5.  Incorporate the knowledge from the speakers' domains (implied by their profiles and topics).
+5.  **Domain Knowledge:** Draw heavily from each speaker's 'domainKnowledge' (topics) list. Treat these topics as their specific area of expertise which they primarily reference when discussing the show context.
 6.  The script should feel authentic, with natural turn-taking.
 7.  **Manage Conversational Dynamics for Realism:**
-    -   **Pacing & Flow:**
-        -   **Information Packaging:** This is your primary guide for pacing. A "Highly Integrated" speaker should have longer, more complex sentences that connect multiple ideas. A "Discrete Segments" speaker should use shorter, more direct sentences, like they are listing points.
-        -   **Confidence Level:** Let this influence speech rhythm. A "Highly Certain" speaker should be fluid and direct. A "Cautious" speaker's lines should include more pauses, hesitations, or filler words (e.g., "Well, I suppose...", "It's sort of like..."), reflecting a more deliberate or uncertain thought process.
-        -   **Dialogue Pattern:** Use this to shape the *purpose* of the speech. A "What X is/means" pattern should lead to more explanatory, methodical pacing. A "How X works" pattern can be more energetic and sequential.
-
-    -   **Interruptions & Overlaps:** The dialogue should NOT be a simple turn-by-turn exchange. Introduce natural overlaps.
-        -   A speaker with a "Highly Certain" \`confidenceLevel\` is a prime candidate to interject, especially if they are also an "Action-Oriented Practitioner." They might cut someone off to correct a detail or to pivot the conversation. (e.g., "Right, but the key thing is...")
-        -   A speaker with a "Cautious" \`confidenceLevel\` is more likely to be interrupted or to yield when someone else starts talking. They might also have false starts. (e.g., Speaker A: "So the framework is..." Speaker B (Cautious): "And I think... oh, sorry, go ahead.")
-        -   Use overlaps to show agreement or excitement, where one speaker finishes another's thought.
+    -   **Pacing & Flow:** Match the 'Information Packaging' (Integrated vs Discrete) and 'Confidence Level' to the rhythm of speech.
+    -   **Interruptions & Overlaps:** Introduce natural overlaps based on confidence levels (e.g., highly certain speakers interjecting).
 8.  The output MUST be only the raw script text. Do not include any titles, headers, or other commentary.
 `;
 
@@ -155,12 +158,12 @@ export const AVAILABLE_MODELS: ModelConfig[] = [
     id: 'gemini-2.5-flash', 
     name: 'Gemini 2.5 Flash', 
     hasThinking: true, 
-    description: 'A fast and versatile model, adept at a wide range of tasks from analysis to creative generation.' 
+    description: 'A fast and versatile model, adept at a wide range of tasks from analysis to creative generation. Great for audio transcription.' 
   },
   {
     id: 'gemini-3-pro-preview',
     name: 'Gemini 3 Pro (Preview)',
-    hasThinking: true,
-    description: 'Excellent for complex reasoning and nuanced persona emulation.'
+    hasThinking: true, 
+    description: 'Best-in-class reasoning and multimodal capabilities. Required for advanced video and image analysis.'
   }
 ];

@@ -1,12 +1,10 @@
-
-
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { Persona, ShowStructure, AppStep, SFLAnalysisResult, DialogueLine, SearchResultItem } from './types';
-import { analyzeDocument, generateDialogue, refineDialogueLine, generateNextDialogueLine } from './services/geminiService';
+import { Persona, ShowStructure, AppStep, SFLAnalysisResult, DialogueLine, SearchResultItem, SourceContent, SourceType } from './types';
+import { analyzeDocument, generateDialogue, refineDialogueLine, generateNextDialogueLine, analyzeShowContext } from './services/geminiService';
 import { searchGoogle } from './services/googleSearchService';
 import PersonaCard from './components/PersonaCard';
 import StepIndicator from './components/StepIndicator';
-import { SparklesIcon, LoaderIcon, FileTextIcon, QuestionMarkCircleIcon } from './components/icons';
+import { SparklesIcon, LoaderIcon, FileTextIcon, QuestionMarkCircleIcon, MicrophoneIcon, VideoCameraIcon, TrashIcon } from './components/icons';
 import RefineScript from './components/RefineScript';
 import ResourceSidebar from './components/ResourceSidebar';
 import ModelSettings from './components/ModelSettings';
@@ -22,12 +20,14 @@ const App: React.FC = () => {
     primaryHostId: null,
     intro: '',
     topics: [],
+    contextSources: [],
   });
   const [dialogueLines, setDialogueLines] = useState<DialogueLine[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRefiningLineId, setIsRefiningLineId] = useState<string | null>(null);
   const [isAddingNextLine, setIsAddingNextLine] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isAnalyzingContext, setIsAnalyzingContext] = useState<boolean>(false);
 
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
   const [isSearching, setIsSearching] = useState<boolean>(false);
@@ -56,7 +56,7 @@ const App: React.FC = () => {
       name: `Speaker ${personas.length + 1}`,
       role: '',
       speakingStyle: '',
-      sourceDocuments: [],
+      sources: [],
       sflProfile: null,
       isAnalyzing: false,
     };
@@ -73,22 +73,97 @@ const App: React.FC = () => {
 
   const handleAnalyzePersona = useCallback(async (id: string) => {
     const persona = personas.find(p => p.id === id);
-    if (!persona || persona.sourceDocuments.length === 0) return;
+    if (!persona || persona.sources.length === 0) return;
 
     handleUpdatePersona(id, { isAnalyzing: true });
     setError(null);
 
     try {
       const { model, budget } = getModelConfig();
-      const allText = persona.sourceDocuments.map(d => d.content).join('\n\n');
-      // Pass budget but not temperature for analysis (kept internal for strictness)
-      const analysisResult = await analyzeDocument(allText, model, budget);
-      handleUpdatePersona(id, { sflProfile: analysisResult, isAnalyzing: false });
+      // Pass the full source objects to the service for multimodal analysis
+      const analysisResult = await analyzeDocument(persona.sources, model, budget);
+      
+      // Auto-populate speaking style combining Tone and SFL Persona Style
+      const autoStyle = `${analysisResult.tone}, ${analysisResult.personaStyle}`;
+
+      handleUpdatePersona(id, { 
+          sflProfile: analysisResult, 
+          speakingStyle: autoStyle,
+          isAnalyzing: false 
+      });
     } catch (e) {
       setError((e as Error).message);
       handleUpdatePersona(id, { isAnalyzing: false });
     }
   }, [personas, handleUpdatePersona, getModelConfig]);
+
+  const handleContextFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>, type: SourceType) => {
+    if (event.target.files) {
+      const files = Array.from(event.target.files);
+      const newSources: SourceContent[] = [];
+      let filesToProcess = files.length;
+
+      files.forEach((file: File) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          if (e.target && typeof e.target.result === 'string') {
+            let data = e.target.result;
+            if (type !== 'text') {
+                // Strip Data URL prefix for base64
+                data = data.split(',')[1];
+            }
+            newSources.push({
+                id: `ctx-source-${Date.now()}-${Math.random()}`,
+                name: file.name,
+                type: type,
+                mimeType: file.type || 'text/plain',
+                data: data
+            });
+          }
+          filesToProcess--;
+          if (filesToProcess === 0) {
+            setShowStructure(prev => ({...prev, contextSources: [...prev.contextSources, ...newSources]}));
+          }
+        };
+        reader.onerror = () => {
+          filesToProcess--;
+           if (filesToProcess === 0) {
+            setShowStructure(prev => ({...prev, contextSources: [...prev.contextSources, ...newSources]}));
+          }
+        };
+        
+        if (type === 'text') {
+            reader.readAsText(file);
+        } else {
+            reader.readAsDataURL(file);
+        }
+      });
+    }
+  }, []);
+
+  const removeContextSource = (id: string) => {
+      setShowStructure(prev => ({...prev, contextSources: prev.contextSources.filter(s => s.id !== id)}));
+  };
+
+  const handleAnalyzeShowContext = async () => {
+    if (showStructure.contextSources.length === 0) return;
+    setIsAnalyzingContext(true);
+    setError(null);
+    try {
+        const { model, budget } = getModelConfig();
+        const result = await analyzeShowContext(showStructure.contextSources, model, budget);
+        setShowStructure(prev => ({
+            ...prev,
+            title: result.title,
+            intro: result.intro,
+            topics: result.topics
+        }));
+    } catch (e) {
+        setError((e as Error).message);
+    } finally {
+        setIsAnalyzingContext(false);
+    }
+  };
 
   const parseScript = (scriptText: string, currentPersonas: Persona[]): DialogueLine[] => {
       const lines = scriptText.split('\n').filter(line => line.includes(':'));
@@ -203,12 +278,16 @@ const App: React.FC = () => {
   const handleNextStep = () => {
     const nextStep = step + 1;
     if (step === AppStep.PERSONA_CONFIG) {
-        const allTopics = personas.flatMap(p => p.sflProfile?.topics || []);
-        const uniqueTopics = [...new Set(allTopics)];
-        if (uniqueTopics.length > 0) {
-            setShowStructure(prev => ({ ...prev, topics: uniqueTopics.slice(0, 5) })); // Limit to 5 topics
-        } else {
-             setShowStructure(prev => ({ ...prev, topics: ['Main Topic'] }));
+        // If topics are empty, pre-populate with some default or extracted ones from personas IF showContext is empty
+        // If showContext exists, the user likely used "Analyze Context" which populates topics.
+        if (showStructure.topics.length === 0) {
+             const allTopics = personas.flatMap(p => p.sflProfile?.topics || []);
+             const uniqueTopics = [...new Set(allTopics)];
+             if (uniqueTopics.length > 0) {
+                setShowStructure(prev => ({ ...prev, topics: uniqueTopics.slice(0, 5) })); 
+             } else {
+                 setShowStructure(prev => ({ ...prev, topics: ['Main Topic'] }));
+             }
         }
     }
     setStep(nextStep);
@@ -283,34 +362,83 @@ const App: React.FC = () => {
         return (
             <div className="max-w-2xl mx-auto bg-brand-surface p-8 rounded-lg shadow-lg border border-brand-border">
                 <div className="space-y-6">
-                    <div>
-                        <label htmlFor="title" className="block text-sm font-medium text-brand-text-secondary">Episode Title</label>
-                        <input type="text" name="title" id="title" value={showStructure.title} onChange={e => setShowStructure({...showStructure, title: e.target.value})} className="mt-1 block w-full bg-brand-bg border-brand-border rounded-md shadow-sm py-2 px-3 text-brand-text-primary focus:outline-none focus:ring-brand-accent focus:border-brand-accent sm:text-sm" />
-                    </div>
-                    <div>
-                        <label htmlFor="host" className="block text-sm font-medium text-brand-text-secondary">Primary Host</label>
-                        <select id="host" name="host" value={showStructure.primaryHostId || ''} onChange={e => setShowStructure({...showStructure, primaryHostId: e.target.value})} className="mt-1 block w-full bg-brand-bg border-brand-border rounded-md shadow-sm py-2 px-3 text-brand-text-primary focus:outline-none focus:ring-brand-accent focus:border-brand-accent sm:text-sm">
-                            <option value="" disabled>Select a host</option>
-                            {personas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label htmlFor="intro" className="block text-sm font-medium text-brand-text-secondary">Intro Outline/Notes</label>
-                        <textarea id="intro" name="intro" rows={3} value={showStructure.intro} onChange={e => setShowStructure({...showStructure, intro: e.target.value})} className="mt-1 block w-full bg-brand-bg border-brand-border rounded-md shadow-sm py-2 px-3 text-brand-text-primary focus:outline-none focus:ring-brand-accent focus:border-brand-accent sm:text-sm" placeholder="e.g., Welcome everyone. Today we're discussing... with our experts..."></textarea>
-                    </div>
                      <div>
-                        <label className="block text-sm font-medium text-brand-text-secondary">Topics</label>
-                        {showStructure.topics.map((topic, index) => (
-                           <div key={index} className="flex items-center mt-1">
-                                <input type="text" value={topic} onChange={e => {
-                                    const newTopics = [...showStructure.topics];
-                                    newTopics[index] = e.target.value;
-                                    setShowStructure({...showStructure, topics: newTopics});
-                                }} className="block w-full bg-brand-bg border-brand-border rounded-md shadow-sm py-2 px-3 text-brand-text-primary focus:outline-none focus:ring-brand-accent focus:border-brand-accent sm:text-sm" />
-                                <button onClick={() => setShowStructure({...showStructure, topics: showStructure.topics.filter((_, i) => i !== index)})} className="ml-2 text-red-500 hover:text-red-400 transition-colors p-1 rounded-full">&times;</button>
-                           </div>
-                        ))}
-                        <button onClick={() => setShowStructure({...showStructure, topics: [...showStructure.topics, '']})} className="mt-2 text-sm text-brand-accent hover:text-brand-accent-hover">+ Add Topic</button>
+                        <label className="block text-sm font-medium text-brand-text-secondary mb-2">Show Context (Optional)</label>
+                        <p className="text-xs text-brand-text-secondary mb-3">Upload files to serve as the context/topic for the episode. The speakers will discuss this content.</p>
+                        <div className="flex gap-2 mb-4">
+                            <label className="cursor-pointer flex items-center px-3 py-2 border border-brand-border rounded-md text-brand-text-secondary hover:border-brand-accent hover:text-brand-accent transition-colors bg-brand-bg/50">
+                                <FileTextIcon className="w-4 h-4 mr-2" />
+                                <span className="text-xs">Text</span>
+                                <input type="file" multiple className="hidden" onChange={(e) => handleContextFileChange(e, 'text')} accept=".txt,.md,.pdf,.csv" />
+                            </label>
+                            <label className="cursor-pointer flex items-center px-3 py-2 border border-brand-border rounded-md text-brand-text-secondary hover:border-brand-accent hover:text-brand-accent transition-colors bg-brand-bg/50">
+                                <MicrophoneIcon className="w-4 h-4 mr-2" />
+                                <span className="text-xs">Audio</span>
+                                <input type="file" multiple className="hidden" onChange={(e) => handleContextFileChange(e, 'audio')} accept="audio/*" />
+                            </label>
+                            <label className="cursor-pointer flex items-center px-3 py-2 border border-brand-border rounded-md text-brand-text-secondary hover:border-brand-accent hover:text-brand-accent transition-colors bg-brand-bg/50">
+                                <VideoCameraIcon className="w-4 h-4 mr-2" />
+                                <span className="text-xs">Video</span>
+                                <input type="file" multiple className="hidden" onChange={(e) => handleContextFileChange(e, 'video')} accept="video/*" />
+                            </label>
+                        </div>
+                        
+                         <div className="space-y-2 mb-4">
+                            {showStructure.contextSources.map(source => (
+                                <div key={source.id} className="flex items-center justify-between bg-brand-bg p-2 rounded-md text-sm">
+                                    <div className="flex items-center gap-2 overflow-hidden">
+                                        <span className="text-brand-text-secondary uppercase text-xs font-bold border border-brand-border px-1 rounded">{source.type}</span>
+                                        <span className="text-brand-text-primary truncate">{source.name || 'Uploaded Content'}</span>
+                                    </div>
+                                    <button onClick={() => removeContextSource(source.id)} className="text-brand-text-secondary hover:text-red-500 ml-2">
+                                        <TrashIcon className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            ))}
+                         </div>
+                         
+                         {showStructure.contextSources.length > 0 && (
+                             <button 
+                                onClick={handleAnalyzeShowContext} 
+                                disabled={isAnalyzingContext}
+                                className="w-full flex items-center justify-center gap-2 py-2 px-4 border border-brand-accent text-brand-accent rounded-md hover:bg-brand-accent hover:text-white transition-colors text-sm font-medium disabled:opacity-50"
+                             >
+                                {isAnalyzingContext ? <LoaderIcon className="w-4 h-4 animate-spin"/> : <SparklesIcon className="w-4 h-4"/>}
+                                Analyze Context & Extract Topics
+                             </button>
+                         )}
+                    </div>
+                    
+                    <div className="border-t border-brand-border pt-6">
+                        <div>
+                            <label htmlFor="title" className="block text-sm font-medium text-brand-text-secondary">Episode Title</label>
+                            <input type="text" name="title" id="title" value={showStructure.title} onChange={e => setShowStructure({...showStructure, title: e.target.value})} className="mt-1 block w-full bg-brand-bg border-brand-border rounded-md shadow-sm py-2 px-3 text-brand-text-primary focus:outline-none focus:ring-brand-accent focus:border-brand-accent sm:text-sm" />
+                        </div>
+                        <div className="mt-4">
+                            <label htmlFor="host" className="block text-sm font-medium text-brand-text-secondary">Primary Host</label>
+                            <select id="host" name="host" value={showStructure.primaryHostId || ''} onChange={e => setShowStructure({...showStructure, primaryHostId: e.target.value})} className="mt-1 block w-full bg-brand-bg border-brand-border rounded-md shadow-sm py-2 px-3 text-brand-text-primary focus:outline-none focus:ring-brand-accent focus:border-brand-accent sm:text-sm">
+                                <option value="" disabled>Select a host</option>
+                                {personas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                        </div>
+                        <div className="mt-4">
+                            <label htmlFor="intro" className="block text-sm font-medium text-brand-text-secondary">Intro Outline/Notes</label>
+                            <textarea id="intro" name="intro" rows={3} value={showStructure.intro} onChange={e => setShowStructure({...showStructure, intro: e.target.value})} className="mt-1 block w-full bg-brand-bg border-brand-border rounded-md shadow-sm py-2 px-3 text-brand-text-primary focus:outline-none focus:ring-brand-accent focus:border-brand-accent sm:text-sm" placeholder="e.g., Welcome everyone. Today we're discussing... with our experts..."></textarea>
+                        </div>
+                         <div className="mt-4">
+                            <label className="block text-sm font-medium text-brand-text-secondary">Topics</label>
+                            {showStructure.topics.map((topic, index) => (
+                               <div key={index} className="flex items-center mt-1">
+                                    <input type="text" value={topic} onChange={e => {
+                                        const newTopics = [...showStructure.topics];
+                                        newTopics[index] = e.target.value;
+                                        setShowStructure({...showStructure, topics: newTopics});
+                                    }} className="block w-full bg-brand-bg border-brand-border rounded-md shadow-sm py-2 px-3 text-brand-text-primary focus:outline-none focus:ring-brand-accent focus:border-brand-accent sm:text-sm" />
+                                    <button onClick={() => setShowStructure({...showStructure, topics: showStructure.topics.filter((_, i) => i !== index)})} className="ml-2 text-red-500 hover:text-red-400 transition-colors p-1 rounded-full">&times;</button>
+                               </div>
+                            ))}
+                            <button onClick={() => setShowStructure({...showStructure, topics: [...showStructure.topics, '']})} className="mt-2 text-sm text-brand-accent hover:text-brand-accent-hover">+ Add Topic</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -325,6 +453,9 @@ const App: React.FC = () => {
                     <p><strong className="text-brand-text-secondary">Host:</strong> {personas.find(p=>p.id === showStructure.primaryHostId)?.name}</p>
                     <p><strong className="text-brand-text-secondary">Speakers:</strong> {personas.map(p => p.name).join(', ')}</p>
                     <p><strong className="text-brand-text-secondary">Model:</strong> {AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name}</p>
+                    {showStructure.contextSources.length > 0 && (
+                        <p><strong className="text-brand-text-secondary">Context Sources:</strong> {showStructure.contextSources.length} files attached</p>
+                    )}
                 </div>
                  <button onClick={handleGenerateScript} disabled={isLoading} className="mt-8 w-full flex items-center justify-center gap-2 px-6 py-4 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-brand-button hover:bg-brand-button-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-button disabled:bg-brand-border transition-colors">
                     {isLoading ? <><LoaderIcon className="w-6 h-6 animate-spin"/> Generating...</> : <><SparklesIcon className="w-6 h-6"/>Generate Script</>}
@@ -378,7 +509,7 @@ const App: React.FC = () => {
                     <QuestionMarkCircleIcon className="w-8 h-8" />
                 </button>
             </div>
-            <p className="mt-4 text-xl text-brand-text-secondary">Transform documents into authentic, multi-speaker dialogues.</p>
+            <p className="mt-4 text-xl text-brand-text-secondary">Transform documents, audio, and video into authentic, multi-speaker dialogues.</p>
         </header>
 
         <div className="mb-12 flex justify-center">

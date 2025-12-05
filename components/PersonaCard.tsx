@@ -1,6 +1,6 @@
-import React, { useCallback } from 'react';
-import { Persona, ProcessDistribution } from '../types';
-import { UserIcon, UploadIcon, TrashIcon, LoaderIcon, SparklesIcon } from './icons';
+import React, { useCallback, useState } from 'react';
+import { Persona, ProcessDistribution, SourceContent, SourceType } from '../types';
+import { UserIcon, UploadIcon, TrashIcon, LoaderIcon, SparklesIcon, VideoCameraIcon, MicrophoneIcon, PhotoIcon, FileTextIcon } from './icons';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface PersonaCardProps {
@@ -40,38 +40,78 @@ const ProcessDistributionChart: React.FC<{ data: ProcessDistribution }> = ({ dat
 
 
 const PersonaCard: React.FC<PersonaCardProps> = ({ persona, onUpdate, onDelete, onAnalyze }) => {
-  const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const [youtubeLink, setYoutubeLink] = useState('');
+
+  const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>, type: SourceType) => {
     if (event.target.files) {
       const files = Array.from(event.target.files);
-      const newDocuments: { name: string, content: string }[] = [];
+      const newSources: SourceContent[] = [];
       let filesToProcess = files.length;
 
-      // Fix: Explicitly type 'file' as File to resolve type inference issues.
       files.forEach((file: File) => {
         const reader = new FileReader();
         reader.onload = (e) => {
           if (e.target && typeof e.target.result === 'string') {
-            newDocuments.push({ name: file.name, content: e.target.result });
+            let data = e.target.result;
+            if (type !== 'text') {
+                // Strip Data URL prefix for base64
+                data = data.split(',')[1];
+            }
+            newSources.push({
+                id: `source-${Date.now()}-${Math.random()}`,
+                name: file.name,
+                type: type,
+                mimeType: file.type || 'text/plain',
+                data: data
+            });
           }
           filesToProcess--;
           if (filesToProcess === 0) {
-            onUpdate(persona.id, { sourceDocuments: [...persona.sourceDocuments, ...newDocuments] });
+            onUpdate(persona.id, { sources: [...persona.sources, ...newSources] });
           }
         };
         reader.onerror = () => {
           filesToProcess--;
            if (filesToProcess === 0) {
-            onUpdate(persona.id, { sourceDocuments: [...persona.sourceDocuments, ...newDocuments] });
+            onUpdate(persona.id, { sources: [...persona.sources, ...newSources] });
           }
         };
-        reader.readAsText(file);
+        
+        if (type === 'text') {
+            reader.readAsText(file);
+        } else {
+            reader.readAsDataURL(file);
+        }
       });
     }
-  }, [persona.id, persona.sourceDocuments, onUpdate]);
+  }, [persona.id, persona.sources, onUpdate]);
 
-  const removeDocument = (docName: string) => {
-    const updatedDocs = persona.sourceDocuments.filter(doc => doc.name !== docName);
-    onUpdate(persona.id, { sourceDocuments: updatedDocs });
+  const addYoutubeLink = () => {
+      if (!youtubeLink.trim()) return;
+      const newSource: SourceContent = {
+          id: `source-${Date.now()}`,
+          name: 'YouTube Link',
+          type: 'youtube',
+          mimeType: 'text/plain',
+          data: youtubeLink
+      };
+      onUpdate(persona.id, { sources: [...persona.sources, newSource] });
+      setYoutubeLink('');
+  };
+
+  const removeSource = (sourceId: string) => {
+    const updatedSources = persona.sources.filter(s => s.id !== sourceId);
+    onUpdate(persona.id, { sources: updatedSources });
+  };
+
+  const getIconForType = (type: SourceType) => {
+      switch(type) {
+          case 'audio': return <MicrophoneIcon className="w-4 h-4" />;
+          case 'video': return <VideoCameraIcon className="w-4 h-4" />;
+          case 'image': return <PhotoIcon className="w-4 h-4" />;
+          case 'youtube': return <div className="w-4 h-4 font-bold text-xs flex items-center justify-center">YT</div>;
+          default: return <FileTextIcon className="w-4 h-4" />;
+      }
   };
 
   return (
@@ -125,28 +165,60 @@ const PersonaCard: React.FC<PersonaCardProps> = ({ persona, onUpdate, onDelete, 
         </div>
 
         <div className="mt-6">
-          <label className="block text-sm font-medium text-brand-text-secondary mb-2">Source Documents</label>
+          <label className="block text-sm font-medium text-brand-text-secondary mb-2">Sources (Text, Audio, Video, Image)</label>
           <div className="space-y-2 mb-4">
-             {persona.sourceDocuments.map(doc => (
-                 <div key={doc.name} className="flex items-center justify-between bg-brand-bg p-2 rounded-md text-sm">
-                     <span className="text-brand-text-primary truncate">{doc.name}</span>
-                     <button onClick={() => removeDocument(doc.name)} className="text-brand-text-secondary hover:text-red-500 ml-2">
+             {persona.sources.map(source => (
+                 <div key={source.id} className="flex items-center justify-between bg-brand-bg p-2 rounded-md text-sm">
+                     <div className="flex items-center gap-2 overflow-hidden">
+                        <span className="text-brand-text-secondary">{getIconForType(source.type)}</span>
+                        <span className="text-brand-text-primary truncate">{source.name || source.data.substring(0, 30)}</span>
+                     </div>
+                     <button onClick={() => removeSource(source.id)} className="text-brand-text-secondary hover:text-red-500 ml-2">
                          <TrashIcon className="w-4 h-4" />
                      </button>
                  </div>
              ))}
           </div>
-          <label htmlFor={`file-upload-${persona.id}`} className="w-full cursor-pointer flex items-center justify-center px-4 py-2 border-2 border-dashed border-brand-border rounded-md text-brand-text-secondary hover:border-brand-accent hover:text-brand-accent transition-colors">
-            <UploadIcon className="w-5 h-5 mr-2" />
-            <span>Upload Document(s)</span>
-          </label>
-          <input id={`file-upload-${persona.id}`} type="file" multiple className="hidden" onChange={handleFileChange} accept=".txt,.md,.pdf" />
+
+          <div className="grid grid-cols-2 gap-2 mb-2">
+               <label className="cursor-pointer flex items-center justify-center px-3 py-2 border border-brand-border rounded-md text-brand-text-secondary hover:border-brand-accent hover:text-brand-accent transition-colors bg-brand-bg/50">
+                    <FileTextIcon className="w-4 h-4 mr-2" />
+                    <span className="text-xs">Text/PDF</span>
+                    <input type="file" multiple className="hidden" onChange={(e) => handleFileChange(e, 'text')} accept=".txt,.md,.pdf,.csv" />
+                </label>
+                <label className="cursor-pointer flex items-center justify-center px-3 py-2 border border-brand-border rounded-md text-brand-text-secondary hover:border-brand-accent hover:text-brand-accent transition-colors bg-brand-bg/50">
+                    <MicrophoneIcon className="w-4 h-4 mr-2" />
+                    <span className="text-xs">Audio</span>
+                    <input type="file" multiple className="hidden" onChange={(e) => handleFileChange(e, 'audio')} accept="audio/*" />
+                </label>
+                <label className="cursor-pointer flex items-center justify-center px-3 py-2 border border-brand-border rounded-md text-brand-text-secondary hover:border-brand-accent hover:text-brand-accent transition-colors bg-brand-bg/50">
+                    <VideoCameraIcon className="w-4 h-4 mr-2" />
+                    <span className="text-xs">Video</span>
+                    <input type="file" multiple className="hidden" onChange={(e) => handleFileChange(e, 'video')} accept="video/*" />
+                </label>
+                 <label className="cursor-pointer flex items-center justify-center px-3 py-2 border border-brand-border rounded-md text-brand-text-secondary hover:border-brand-accent hover:text-brand-accent transition-colors bg-brand-bg/50">
+                    <PhotoIcon className="w-4 h-4 mr-2" />
+                    <span className="text-xs">Image</span>
+                    <input type="file" multiple className="hidden" onChange={(e) => handleFileChange(e, 'image')} accept="image/*" />
+                </label>
+          </div>
+          
+          <div className="flex gap-2">
+              <input 
+                type="text" 
+                value={youtubeLink}
+                onChange={(e) => setYoutubeLink(e.target.value)}
+                placeholder="YouTube URL..."
+                className="flex-grow bg-brand-bg border-brand-border rounded-md px-3 py-1 text-sm focus:outline-none focus:border-brand-accent"
+              />
+              <button onClick={addYoutubeLink} className="text-xs bg-brand-surface border border-brand-border px-3 py-1 rounded-md hover:bg-brand-accent hover:text-white transition-colors">Add</button>
+          </div>
         </div>
 
         <div className="mt-6">
           <button
             onClick={() => onAnalyze(persona.id)}
-            disabled={persona.sourceDocuments.length === 0 || persona.isAnalyzing}
+            disabled={persona.sources.length === 0 || persona.isAnalyzing}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-brand-button hover:bg-brand-button-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-button disabled:bg-brand-border disabled:cursor-not-allowed transition-colors"
           >
             {persona.isAnalyzing ? <><LoaderIcon className="w-5 h-5 animate-spin" /> Analyzing...</> : <><SparklesIcon className="w-5 h-5"/>Analyze & Build Profile</>}
@@ -164,6 +236,7 @@ const PersonaCard: React.FC<PersonaCardProps> = ({ persona, onUpdate, onDelete, 
             </div>
             <div className="space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-brand-text-secondary">Style:</span> <span className="text-brand-text-primary font-semibold">{persona.sflProfile.personaStyle}</span></div>
+                <div className="flex justify-between"><span className="text-brand-text-secondary">Tone:</span> <span className="text-brand-text-primary font-semibold">{persona.sflProfile.tone}</span></div>
                 <div className="flex justify-between"><span className="text-brand-text-secondary">Confidence:</span> <span className="text-brand-text-primary font-semibold">{persona.sflProfile.confidenceLevel}</span></div>
                 <div className="flex justify-between"><span className="text-brand-text-secondary">Packaging:</span> <span className="text-brand-text-primary font-semibold">{persona.sflProfile.informationPackaging}</span></div>
                 <div className="flex justify-between"><span className="text-brand-text-secondary">Reference:</span> <span className="text-brand-text-primary font-semibold">{persona.sflProfile.referenceStyle}</span></div>
