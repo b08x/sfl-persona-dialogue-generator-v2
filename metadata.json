@@ -1,0 +1,6 @@
+{
+  "name": "SFL-Persona-Dialogue-Generator",
+  "description": "An advanced system that analyzes source documents using Systemic Functional Linguistics (SFL) to configure distinct speaker personas. It then generates professional, multi-speaker podcast dialogues, ensuring each persona maintains a consistent and authentic linguistic style based on their source material.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
