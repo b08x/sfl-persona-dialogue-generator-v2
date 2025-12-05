@@ -1,3 +1,4 @@
+
 export interface ProcessDistribution {
   material: number;
   mental: number;
@@ -19,6 +20,7 @@ export interface SFLAnalysisResult {
   processDistribution: ProcessDistribution;
   technicalityLevel: number; // Scale 1-10
   topics: string[];
+  analysisExplanation: string;
 }
 
 export type SourceType = 'text' | 'audio' | 'video' | 'image' | 'youtube';

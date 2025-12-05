@@ -1,3 +1,4 @@
+
 import React, { useCallback, useState } from 'react';
 import { Persona, ProcessDistribution, SourceContent, SourceType } from '../types';
 import { UserIcon, UploadIcon, TrashIcon, LoaderIcon, SparklesIcon, VideoCameraIcon, MicrophoneIcon, PhotoIcon, FileTextIcon } from './icons';
@@ -229,6 +230,13 @@ const PersonaCard: React.FC<PersonaCardProps> = ({ persona, onUpdate, onDelete, 
       {persona.sflProfile && (
         <div className="bg-brand-surface/50 p-6 border-t border-brand-border">
           <h3 className="text-lg font-semibold text-brand-accent mb-4">SFL Profile</h3>
+          
+          {persona.sflProfile.analysisExplanation && (
+             <div className="mb-6 p-3 bg-brand-bg/50 border-l-4 border-brand-accent rounded-r-md">
+                 <p className="text-sm text-brand-text-secondary italic">"{persona.sflProfile.analysisExplanation}"</p>
+             </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <h4 className="text-md font-medium text-brand-text-primary mb-2">Process Distribution</h4>

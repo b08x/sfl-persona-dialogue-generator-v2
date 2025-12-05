@@ -1,3 +1,4 @@
+
 import { Persona, ShowStructure, ModelConfig } from './types';
 
 export const SFL_ANALYSIS_SYSTEM_INSTRUCTION = `You are an expert linguistics analyst specializing in Systemic Functional Linguistics (SFL). Your task is to analyze the provided sources (which may include text, audio, video, or images) and provide a detailed linguistic profile in a specific JSON format. When analyzing audio or video, pay close attention to the speaker's tone, pacing, hesitation, and emotional delivery to inform the 'Interpersonal Mapping'.`;
@@ -24,7 +25,8 @@ Please analyze the provided content based on SFL principles and provide the outp
     "verbal": number
   },
   "technicalityLevel": number,
-  "topics": ["string"]
+  "topics": ["string"],
+  "analysisExplanation": "string"
 }
 
 **ANALYSIS GUIDELINES:**
@@ -46,6 +48,7 @@ Please analyze the provided content based on SFL principles and provide the outp
     - If cohesion is low: SET informationPackaging = "Discrete Segments", topicDevelopment = "Independent Points", referenceStyle = "Explicit Reference".
 6.  **Technicality Level**: Score from 1 (conversational) to 10 (highly technical) based on lexical density and specialized terms.
 7.  **Domain Knowledge & Topics**: Identify 5 key areas of domain expertise, specialized subjects, or core topics this speaker is knowledgeable about. These will be used as their primary knowledge base for dialogue generation.
+8.  **Analysis Explanation**: Provide a brief, insightful summary (2-3 sentences) explaining the key linguistic evidence extracted from the source material and how it informs the generated profile (e.g., "The high frequency of relational processes indicates a focus on defining concepts, resulting in a 'Definitional Expert' style...").
 
 Now, provide the JSON object for the content provided.
 `;

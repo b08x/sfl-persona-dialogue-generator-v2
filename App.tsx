@@ -305,6 +305,38 @@ const App: React.FC = () => {
     }
   };
 
+  const handleExportJson = useCallback(() => {
+    const exportData = {
+        show: {
+            title: showStructure.title,
+            generatedAt: new Date().toISOString(),
+            host: personas.find(p => p.id === showStructure.primaryHostId)?.name,
+            intro: showStructure.intro,
+            topics: showStructure.topics
+        },
+        personas: personas.map(p => ({
+            name: p.name,
+            role: p.role,
+            style: p.speakingStyle,
+            sflProfile: p.sflProfile
+        })),
+        script: dialogueLines.map(l => ({
+            speaker: l.speakerName,
+            text: l.line
+        }))
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${showStructure.title.trim().replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'podcast'}_script.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [showStructure, personas, dialogueLines]);
+
   const isNextEnabled = useMemo(() => {
     if (step === AppStep.PERSONA_CONFIG) {
       return personas.length > 0 && personas.every(p => p.sflProfile !== null);
@@ -479,6 +511,7 @@ const App: React.FC = () => {
                         <h2 className="text-3xl font-bold text-brand-text-primary flex items-center gap-3"><FileTextIcon className="w-8 h-8 text-brand-accent"/>Final Script</h2>
                          <div className="flex gap-4">
                             <button onClick={() => setStep(AppStep.REFINE_SCRIPT)} className="px-4 py-2 bg-brand-surface text-brand-text-primary rounded-md hover:bg-brand-surface/80 transition-colors">&larr; Back to Refine</button>
+                            <button onClick={handleExportJson} className="px-4 py-2 bg-brand-surface border border-brand-border text-brand-text-primary rounded-md hover:bg-brand-surface/80 hover:text-brand-accent transition-colors">Export JSON</button>
                             <button onClick={() => navigator.clipboard.writeText(finalScript)} className="px-4 py-2 bg-brand-button text-white rounded-md hover:bg-brand-button-hover transition-opacity">Copy to Clipboard</button>
                             <button onClick={() => setStep(AppStep.PERSONA_CONFIG)} className="px-4 py-2 bg-brand-surface text-brand-text-primary rounded-md hover:bg-brand-surface/80 transition-colors">Start Over</button>
                         </div>

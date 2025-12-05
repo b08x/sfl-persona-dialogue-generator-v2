@@ -2,6 +2,18 @@ import React, { useState } from 'react';
 import { DialogueLine, Persona } from '../types';
 import { UserIcon, EditIcon, SparklesIcon, PlusIcon, LoaderIcon } from './icons';
 
+const REFINEMENT_TEMPLATES = [
+    "Make it more concise",
+    "Elaborate with an example",
+    "Make it more casual",
+    "Make it more formal",
+    "Add a touch of humor",
+    "Focus on technical details",
+    "Express doubt/hedging",
+    "Make it more assertive",
+    "Connect to the previous point"
+];
+
 interface DialogueLineEditProps {
     line: DialogueLine;
     persona: Persona | undefined;
@@ -36,6 +48,19 @@ const DialogueLineEdit: React.FC<DialogueLineEditProps> = ({ line, persona, onRe
                 </div>
                 {isEditing && (
                     <div className="mt-4 pt-4 border-t border-brand-border">
+                        <label className="text-xs font-semibold text-brand-text-secondary uppercase tracking-wider mb-2 block">Quick Actions</label>
+                        <div className="flex flex-wrap gap-2 mb-4">
+                            {REFINEMENT_TEMPLATES.map(template => (
+                                <button
+                                    key={template}
+                                    onClick={() => setPrompt(template)}
+                                    className="text-xs px-3 py-1.5 rounded-full border border-brand-border bg-brand-bg/50 text-brand-text-secondary hover:text-white hover:border-brand-accent hover:bg-brand-accent/10 transition-all"
+                                >
+                                    {template}
+                                </button>
+                            ))}
+                        </div>
+
                         <label className="text-sm font-medium text-brand-text-secondary">Refinement Prompt</label>
                         <div className="mt-1 flex gap-2">
                              <input
